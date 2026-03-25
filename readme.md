@@ -34,3 +34,20 @@ You should get a consolidated image with left right and heatmap, as well as a po
 ```bash
 $env:TORCH_COMPILE_DISABLE="1"; $env:TORCHDYNAMO_DISABLE="1"
 ```
+
+
+## DOCKER!
+
+Build image from repo root: docker build -t ffs -f docker/dockerfile .
+Start GPU container (PowerShell): docker run --gpus all -it --rm -v "${PWD}:/workspace" -w /workspace ffs bash
+Inside container:
+python make_onnx.py --model_dir model_best_bp2_serialize.pth --save_path output/ --height 448 --width 640 --valid_iters 2 --max_disp 160
+trtexec --onnx=output/feature_runner.onnx --saveEngine=output/feature_runner.engine --fp16 --useCudaGraph
+Your repo’s current launcher run_container.sh is Linux-style; I can create a Windows PowerShell equivalent script next if you want.
+
+
+## Profile_Speed_TRT!
+
+```bash
+python profile_speed_trt.py --onnx_dir output/ --warmup 20 --total 80
+```

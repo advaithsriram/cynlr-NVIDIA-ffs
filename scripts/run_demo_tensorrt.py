@@ -3,7 +3,8 @@ code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f'{code_dir}/../')
 from omegaconf import OmegaConf
 from core.utils.utils import InputPadder
-import argparse, torch, imageio, logging, yaml
+import argparse, torch, logging, yaml
+import imageio.v2 as imageio
 import numpy as np
 from Utils import (
     set_logging_format, set_seed, vis_disparity,
@@ -11,6 +12,27 @@ from Utils import (
 )
 from core.foundation_stereo import TrtRunner
 import cv2
+
+
+def is_gui_available() -> bool:
+  if os.name == 'nt':
+    return True
+  return bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+
+
+def resolve_onnx_cfg_path(onnx_dir: str) -> str:
+  onnx_dir = os.path.normpath(onnx_dir)
+  candidates = [
+    os.path.join(onnx_dir, 'onnx.yaml'),
+    os.path.join(os.path.dirname(onnx_dir), 'onnx.yaml'),
+  ]
+  for p in candidates:
+    if os.path.exists(p):
+      return p
+  raise FileNotFoundError(
+    f"onnx.yaml not found. Looked in: {candidates}. "
+    "Please run scripts/make_onnx.py first to generate ONNX metadata."
+  )
 
 
 if __name__=="__main__":
@@ -27,21 +49,25 @@ if __name__=="__main__":
   parser.add_argument('--denoise_radius', type=float, default=0.03, help='radius to use for outlier removal')
   parser.add_argument('--get_pc', type=int, default=1, help='save point cloud output')
   parser.add_argument('--zfar', type=float, default=100, help="max depth to include in point cloud")
+  parser.add_argument('--no_gui', type=int, default=0, help='disable cv2/open3d visualization windows')
   args = parser.parse_args()
 
   set_logging_format()
   set_seed(0)
   torch.autograd.set_grad_enabled(False)
+  os.makedirs(args.out_dir, exist_ok=True)
 
-  os.system(f'rm -rf {args.out_dir} && mkdir -p {args.out_dir}')
-
-  with open(f'{os.path.dirname(args.onnx_dir)}/onnx.yaml', 'r') as ff:
+  onnx_cfg_path = resolve_onnx_cfg_path(args.onnx_dir)
+  with open(onnx_cfg_path, 'r') as ff:
     cfg:dict = yaml.safe_load(ff)
   for k in args.__dict__:
     if args.__dict__[k] is not None:
       cfg[k] = args.__dict__[k]
   args = OmegaConf.create(cfg)
   logging.info(f"args:\n{args}")
+  show_gui = (not args.no_gui) and is_gui_available()
+  if (not args.no_gui) and (not show_gui):
+    logging.info("GUI display not available (headless environment). Skipping visualization windows.")
   model = TrtRunner(args, args.onnx_dir+'/feature_runner.engine', args.onnx_dir+'/post_runner.engine')
 
   img0 = imageio.imread(args.left_file)
@@ -82,8 +108,9 @@ if __name__=="__main__":
   imageio.imwrite(f'{args.out_dir}/disp_vis.png', vis)
   s = 1280/vis.shape[1]
   resized_vis = cv2.resize(vis, (int(vis.shape[1]*s), int(vis.shape[0]*s)))
-  cv2.imshow('disp', resized_vis[:,:,::-1])
-  cv2.waitKey(0)
+  if show_gui:
+    cv2.imshow('disp', resized_vis[:,:,::-1])
+    cv2.waitKey(0)
 
   if args.remove_invisible:
     yy,xx = np.meshgrid(np.arange(disp.shape[0]), np.arange(disp.shape[1]), indexing='ij')
@@ -96,7 +123,8 @@ if __name__=="__main__":
       lines = f.readlines()
       K = np.array(list(map(float, lines[0].rstrip().split()))).astype(np.float32).reshape(3,3)
       baseline = float(lines[1])
-    K[:2] *= np.array([fx, fy])
+    K[0, :] *= fx
+    K[1, :] *= fy
     depth = K[0,0]*baseline/disp
     np.save(f'{args.out_dir}/depth_meter.npy', depth)
     xyz_map = depth2xyzmap(depth, K)
@@ -114,16 +142,17 @@ if __name__=="__main__":
       o3d.io.write_point_cloud(f'{args.out_dir}/cloud_denoise.ply', inlier_cloud)
       pcd = inlier_cloud
 
-    logging.info("Visualizing point cloud. Press ESC to exit.")
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-    vis.add_geometry(pcd)
-    vis.get_render_option().point_size = 1.0
-    vis.get_render_option().background_color = np.array([0.5, 0.5, 0.5])
-    ctr = vis.get_view_control()
-    ctr.set_front([0, 0, -1])
-    id = np.asarray(pcd.points)[:,2].argmin()
-    ctr.set_lookat(np.asarray(pcd.points)[id])
-    ctr.set_up([0, -1, 0])
-    vis.run()
-    vis.destroy_window()
+    if show_gui:
+      logging.info("Visualizing point cloud. Press ESC to exit.")
+      vis = o3d.visualization.Visualizer()
+      vis.create_window()
+      vis.add_geometry(pcd)
+      vis.get_render_option().point_size = 1.0
+      vis.get_render_option().background_color = np.array([0.5, 0.5, 0.5])
+      ctr = vis.get_view_control()
+      ctr.set_front([0, 0, -1])
+      id = np.asarray(pcd.points)[:,2].argmin()
+      ctr.set_lookat(np.asarray(pcd.points)[id])
+      ctr.set_up([0, -1, 0])
+      vis.run()
+      vis.destroy_window()
