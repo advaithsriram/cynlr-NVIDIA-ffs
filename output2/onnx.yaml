@@ -10,3 +10,4 @@ n_gru_layers: 1
 normalize: false
 valid_iters: 2
 vit_size: vitl
+image_size: [448, 640]
