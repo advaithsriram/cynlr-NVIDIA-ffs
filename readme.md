@@ -43,11 +43,42 @@ Start GPU container (PowerShell): docker run --gpus all -it --rm -v "${PWD}:/wor
 Inside container:
 python make_onnx.py --model_dir model_best_bp2_serialize.pth --save_path output/ --height 448 --width 640 --valid_iters 2 --max_disp 160
 trtexec --onnx=output/feature_runner.onnx --saveEngine=output/feature_runner.engine --fp16 --useCudaGraph
-Your repo’s current launcher run_container.sh is Linux-style; I can create a Windows PowerShell equivalent script next if you want.
+trtexec --onnx=output/post_runner.onnx --saveEngine=output/post_runner.engine --fp16 --useCudaGraph
+
+
+## Windows TensorRT (local)
+
+Use the same TensorRT version for engine build and runtime.
+
+Install Triton for Windows (PyTorch 2.6):
+
+```powershell
+python -m pip install --force-reinstall triton-windows==3.2.0.post21
+```
+
+```powershell
+# 1) Export ONNX
+python scripts/make_onnx.py --model_dir weights/20-26-39/model_best_bp2_serialize.pth --save_path output2/ --height 448 --width 640 --valid_iters 2 --max_disp 160
+
+# 2) Build BOTH engines with your local trtexec.exe
+& "C:/path/to/TensorRT-10.16.0.72/bin/trtexec.exe" --onnx=output2/feature_runner.onnx --saveEngine=output2/feature_runner.engine --fp16 --useCudaGraph
+& "C:/path/to/TensorRT-10.16.0.72/bin/trtexec.exe" --onnx=output2/post_runner.onnx --saveEngine=output2/post_runner.engine --fp16 --useCudaGraph
+
+# 3) Run TensorRT demo (headless-safe path)
+python scripts/run_demo_tensorrt.py --onnx_dir output2/ --left_file demo_data/left.png --right_file demo_data/right.png --intrinsic_file demo_data/K.txt --out_dir output2/ --remove_invisible 0 --denoise_cloud 1 --get_pc 0 --zfar 100
+```
+
+If you hit Torch Dynamo/Triton compile errors on Windows:
+
+```powershell
+$env:TORCH_COMPILE_DISABLE="1"; $env:TORCHDYNAMO_DISABLE="1"
+```
 
 
 ## Profile_Speed_TRT!
 
 ```bash
-python profile_speed_trt.py --onnx_dir output/ --warmup 20 --total 80
+python scripts/profile_speed_trt.py --onnx_dir output2/ --warmup 20 --total 80
 ```
+
+Latest local Windows result (output2): ~54.5 ms average after warmup.
