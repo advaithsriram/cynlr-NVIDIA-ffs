@@ -4,7 +4,7 @@ sys.path.append(f'{code_dir}/../')
 from omegaconf import OmegaConf
 from core.utils.utils import InputPadder
 import argparse, torch, logging, yaml
-import imageio
+import imageio.v2 as imageio
 import numpy as np
 from Utils import (
     set_logging_format, set_seed, vis_disparity,
@@ -12,6 +12,12 @@ from Utils import (
 )
 from core.foundation_stereo import TrtRunner
 import cv2
+
+
+def is_gui_available() -> bool:
+  if os.name == 'nt':
+    return True
+  return bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
 
 
 def resolve_onnx_cfg_path(onnx_dir: str) -> str:
@@ -43,6 +49,7 @@ if __name__=="__main__":
   parser.add_argument('--denoise_radius', type=float, default=0.03, help='radius to use for outlier removal')
   parser.add_argument('--get_pc', type=int, default=1, help='save point cloud output')
   parser.add_argument('--zfar', type=float, default=100, help="max depth to include in point cloud")
+  parser.add_argument('--no_gui', type=int, default=0, help='disable cv2/open3d visualization windows')
   args = parser.parse_args()
 
   set_logging_format()
@@ -58,6 +65,9 @@ if __name__=="__main__":
       cfg[k] = args.__dict__[k]
   args = OmegaConf.create(cfg)
   logging.info(f"args:\n{args}")
+  show_gui = (not args.no_gui) and is_gui_available()
+  if (not args.no_gui) and (not show_gui):
+    logging.info("GUI display not available (headless environment). Skipping visualization windows.")
   model = TrtRunner(args, args.onnx_dir+'/feature_runner.engine', args.onnx_dir+'/post_runner.engine')
 
   img0 = imageio.imread(args.left_file)
@@ -98,8 +108,9 @@ if __name__=="__main__":
   imageio.imwrite(f'{args.out_dir}/disp_vis.png', vis)
   s = 1280/vis.shape[1]
   resized_vis = cv2.resize(vis, (int(vis.shape[1]*s), int(vis.shape[0]*s)))
-  cv2.imshow('disp', resized_vis[:,:,::-1])
-  cv2.waitKey(0)
+  if show_gui:
+    cv2.imshow('disp', resized_vis[:,:,::-1])
+    cv2.waitKey(0)
 
   if args.remove_invisible:
     yy,xx = np.meshgrid(np.arange(disp.shape[0]), np.arange(disp.shape[1]), indexing='ij')
@@ -131,16 +142,17 @@ if __name__=="__main__":
       o3d.io.write_point_cloud(f'{args.out_dir}/cloud_denoise.ply', inlier_cloud)
       pcd = inlier_cloud
 
-    logging.info("Visualizing point cloud. Press ESC to exit.")
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-    vis.add_geometry(pcd)
-    vis.get_render_option().point_size = 1.0
-    vis.get_render_option().background_color = np.array([0.5, 0.5, 0.5])
-    ctr = vis.get_view_control()
-    ctr.set_front([0, 0, -1])
-    id = np.asarray(pcd.points)[:,2].argmin()
-    ctr.set_lookat(np.asarray(pcd.points)[id])
-    ctr.set_up([0, -1, 0])
-    vis.run()
-    vis.destroy_window()
+    if show_gui:
+      logging.info("Visualizing point cloud. Press ESC to exit.")
+      vis = o3d.visualization.Visualizer()
+      vis.create_window()
+      vis.add_geometry(pcd)
+      vis.get_render_option().point_size = 1.0
+      vis.get_render_option().background_color = np.array([0.5, 0.5, 0.5])
+      ctr = vis.get_view_control()
+      ctr.set_front([0, 0, -1])
+      id = np.asarray(pcd.points)[:,2].argmin()
+      ctr.set_lookat(np.asarray(pcd.points)[id])
+      ctr.set_up([0, -1, 0])
+      vis.run()
+      vis.destroy_window()

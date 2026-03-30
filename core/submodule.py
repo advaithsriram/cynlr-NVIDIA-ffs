@@ -373,8 +373,7 @@ class Conv2x_IN(nn.Module):
 
 
 
-@torch.compile
-def build_gwc_volume_optimized_pytorch1(refimg_fea: torch.Tensor, targetimg_fea: torch.Tensor, maxdisp: int, num_groups: int, normalize=True):
+def _build_gwc_volume_optimized_pytorch1_impl(refimg_fea: torch.Tensor, targetimg_fea: torch.Tensor, maxdisp: int, num_groups: int, normalize=True):
   dtype = refimg_fea.dtype
   B, C, H, W = refimg_fea.shape
   channels_per_group = C // num_groups
@@ -392,6 +391,15 @@ def build_gwc_volume_optimized_pytorch1(refimg_fea: torch.Tensor, targetimg_fea:
   cost_volume = (ref_volume * target_volume).sum(dim=2)
 
   return cost_volume.contiguous()
+
+
+if hasattr(torch, 'compile'):
+  try:
+    build_gwc_volume_optimized_pytorch1 = torch.compile(_build_gwc_volume_optimized_pytorch1_impl, backend='eager')
+  except Exception:
+    build_gwc_volume_optimized_pytorch1 = _build_gwc_volume_optimized_pytorch1_impl
+else:
+  build_gwc_volume_optimized_pytorch1 = _build_gwc_volume_optimized_pytorch1_impl
 
 
 if triton is not None and torch.cuda.is_available():

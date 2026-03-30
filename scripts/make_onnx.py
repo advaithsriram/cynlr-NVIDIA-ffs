@@ -5,7 +5,13 @@ code_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(f'{code_dir}/../')
 import omegaconf, yaml, torch,pdb
 from omegaconf import OmegaConf
-from core.foundation_stereo import FastFoundationStereo, TrtFeatureRunner, TrtPostRunner, build_gwc_volume_triton
+from core.foundation_stereo import (
+    FastFoundationStereo,
+    TrtFeatureRunner,
+    TrtPostRunner,
+    build_gwc_volume_triton,
+    build_gwc_volume_optimized_pytorch1,
+)
 import Utils as U
 
 
@@ -37,6 +43,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_gru_layers', type=int, default=1, help="number of hidden GRU levels")
     parser.add_argument('--max_disp', type=int, default=192, help="max disp of geometry encoding volume")
     parser.add_argument('--low_memory', type=int, default=1, help='reduce memory usage')
+    parser.add_argument('--build_volume_backend', default='pytorch1', choices=['pytorch1', 'triton', 'auto'], help='backend for GWC volume build during ONNX export')
     args = parser.parse_args()
     os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
 
@@ -67,7 +74,24 @@ if __name__ == '__main__':
     )
 
     features_left_04, features_left_08, features_left_16, features_left_32, features_right_04, stem_2x = feature_runner(left_img, right_img)
-    gwc_volume = build_gwc_volume_triton(features_left_04.half(), features_right_04.half(), args.max_disp//4, model.cv_group)
+    if args.build_volume_backend == 'pytorch1':
+        gwc_volume = build_gwc_volume_optimized_pytorch1(
+            features_left_04.half(), features_right_04.half(), args.max_disp//4, model.cv_group
+        )
+    elif args.build_volume_backend == 'triton':
+        gwc_volume = build_gwc_volume_triton(
+            features_left_04.half(), features_right_04.half(), args.max_disp//4, model.cv_group
+        )
+    else:
+        try:
+            gwc_volume = build_gwc_volume_triton(
+                features_left_04.half(), features_right_04.half(), args.max_disp//4, model.cv_group
+            )
+        except Exception as exc:
+            warnings.warn(f'Triton backend unavailable ({exc}); falling back to pytorch1 backend.')
+            gwc_volume = build_gwc_volume_optimized_pytorch1(
+                features_left_04.half(), features_right_04.half(), args.max_disp//4, model.cv_group
+            )
     disp = post_runner(features_left_04.float(), features_left_08.float(), features_left_16.float(), features_left_32.float(), features_right_04.float(), stem_2x.float(), gwc_volume.float())
 
     torch.onnx.export(

@@ -25,12 +25,19 @@ if __name__=="__main__":
   parser.add_argument('--max_disp', type=int, default=192, help='maximum disparity')
   parser.add_argument('--warmup', type=int, default=15, help='number of warmup iterations')
   parser.add_argument('--total', type=int, default=30, help='total number of iterations')
+  parser.add_argument('--build_volume_backend', default='pytorch1', choices=['pytorch1', 'triton'], help='backend for cost-volume build')
   args = parser.parse_args()
 
   set_logging_format()
   set_seed(0)
   torch.backends.cudnn.benchmark = True
   torch.autograd.set_grad_enabled(False)
+
+  try:
+    import torch._dynamo
+    torch._dynamo.config.suppress_errors = True
+  except Exception:
+    pass
 
   with open(f'{os.path.dirname(args.model_dir)}/cfg.yaml', 'r') as ff:
     cfg:dict = yaml.safe_load(ff)
@@ -56,7 +63,13 @@ if __name__=="__main__":
     for i in range(args.total):
       torch.cuda.synchronize()
       t0 = time.perf_counter()
-      disp = model.forward(img0, img1, iters=args.valid_iters, test_mode=True, optimize_build_volume='triton')
+      disp = model.forward(
+        img0,
+        img1,
+        iters=args.valid_iters,
+        test_mode=True,
+        optimize_build_volume=args.build_volume_backend,
+      )
       torch.cuda.synchronize()
       elapsed = time.perf_counter() - t0
       times.append(elapsed)

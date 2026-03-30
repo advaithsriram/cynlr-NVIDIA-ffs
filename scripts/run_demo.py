@@ -7,11 +7,13 @@
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
 import os,sys
+import shutil
 code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f'{code_dir}/../')
 from omegaconf import OmegaConf
 from core.utils.utils import InputPadder
-import argparse, torch, imageio, logging, yaml
+import argparse, torch, logging, yaml
+import imageio.v2 as imageio
 import numpy as np
 from Utils import (
     AMP_DTYPE, set_logging_format, set_seed, vis_disparity,
@@ -34,7 +36,7 @@ if __name__=="__main__":
   parser.add_argument('--denoise_radius', type=float, default=0.03, help='radius to use for outlier removal')
   parser.add_argument('--scale', default=1, type=float)
   parser.add_argument('--hiera', default=0, type=int)
-  parser.add_argument('--get_pc', type=int, default=1, help='save point cloud output')
+  parser.add_argument('--get_pc', type=int, default=0, help='save point cloud output 1 or 0')
   parser.add_argument('--valid_iters', type=int, default=8, help='number of flow-field updates during forward pass')
   parser.add_argument('--max_disp', type=int, default=192, help='maximum disparity')
   parser.add_argument('--zfar', type=float, default=100, help="max depth to include in point cloud")
@@ -44,7 +46,14 @@ if __name__=="__main__":
   set_seed(0)
   torch.autograd.set_grad_enabled(False)
 
-  os.system(f'rm -rf {args.out_dir} && mkdir -p {args.out_dir}')
+  try:
+    import torch._dynamo
+    torch._dynamo.config.suppress_errors = True
+  except Exception:
+    pass
+
+  shutil.rmtree(args.out_dir, ignore_errors=True)
+  os.makedirs(args.out_dir, exist_ok=True)
 
   with open(f'{os.path.dirname(args.model_dir)}/cfg.yaml', 'r') as ff:
     cfg:dict = yaml.safe_load(ff)
